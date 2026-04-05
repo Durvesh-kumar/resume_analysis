@@ -167,7 +167,7 @@ jobs:
       - name: Start full stack
         run: |
           echo "🚀 Starting full stack..."
-          docker-compose -f docker-compose.production.yaml up -d --build --force-recreate
+          docker compose -f docker-compose.production.yaml up -d --build --force-recreate
           sleep 15
 
       - name: Check all containers running
@@ -176,34 +176,33 @@ jobs:
           FAILED=$(docker ps -a --filter "status=exited" --format "{{.Names}}")
           if [ -n "$FAILED" ]; then
             echo "❌ Failed: $FAILED"
-            docker-compose -f docker-compose.production.yaml logs --tail=50
+            docker compose -f docker-compose.production.yaml logs --tail=50
             exit 1
           fi
-          echo "✅ All containers running"
 
       - name: Test backend health
         run: |
           curl -sf http://localhost:5000/health && echo "✅ Backend OK" || {
-            docker-compose -f docker-compose.production.yaml logs backend --tail=30
+            docker compose -f docker-compose.production.yaml logs backend --tail=30
             exit 1
           }
 
       - name: Test frontend health
         run: |
           curl -sf http://localhost && echo "✅ Frontend OK" || {
-            docker-compose -f docker-compose.production.yaml logs frontend --tail=30
+            docker compose -f docker-compose.production.yaml logs frontend --tail=30
             exit 1
           }
 
       - name: Test API proxy
         run: |
           curl -sf http://localhost/api/health && echo "✅ API proxy OK" || {
-            echo "⚠️ API proxy not responding (check nginx config)"
+            echo "⚠️ API proxy not responding"
           }
 
       - name: Cleanup
         if: always()
-        run: docker-compose -f docker-compose.production.yaml down
+        run: docker compose -f docker-compose.production.yaml down
 
   # ─────────────────────────────────────────
   # 🚀 Job 5: Deploy to AWS EC2
