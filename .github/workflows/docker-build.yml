@@ -1,4 +1,4 @@
-name: 🤖 AI CI/CD Pipeline (Docker + Deploy)
+name: 🤖 AI CI/CD Pipeline (Smart Deploy)
 
 on:
   push:
@@ -6,104 +6,251 @@ on:
   pull_request:
 
 jobs:
-  build-test-deploy:
+  # ─────────────────────────────────────────
+  # 🔍 Job 1: Detect what changed
+  # ─────────────────────────────────────────
+  detect-changes:
     runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      docker: ${{ steps.changes.outputs.docker }}
+      infra: ${{ steps.changes.outputs.infra }}
 
     steps:
-      # 📥 Checkout code
-      - name: Checkout repository
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          echo "🔍 Detecting changes..."
+
+          # Get changed files
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          # Detect backend changes
+          if echo "$CHANGED" | grep -qE "^apps/backend/|^package.*\.json$|^tsconfig"; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "✅ Backend changed"
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Backend unchanged"
+          fi
+
+          # Detect frontend changes
+          if echo "$CHANGED" | grep -qE "^apps/frontend/|^nginx\.conf$"; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "✅ Frontend changed"
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Frontend unchanged"
+          fi
+
+          # Detect Dockerfile changes
+          if echo "$CHANGED" | grep -qE "Dockerfile|\.dockerignore"; then
+            echo "docker=true" >> $GITHUB_OUTPUT
+            echo "✅ Docker config changed"
+          else
+            echo "docker=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Detect infra changes
+          if echo "$CHANGED" | grep -qE "docker-compose|scripts/"; then
+            echo "infra=true" >> $GITHUB_OUTPUT
+            echo "✅ Infra/scripts changed"
+          else
+            echo "infra=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ─────────────────────────────────────────
+  # 🔨 Job 2: Build Backend (if changed)
+  # ─────────────────────────────────────────
+  build-backend:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.docker == 'true'
+
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 🟢 Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: "npm"
 
-      # 📦 Install dependencies
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # 🐳 Check Docker
-      - name: Check Docker
-        run: docker --version
-
-      # 🔨 Build Docker images
-      - name: Build Backend Image
-        run: docker build -t backend ./apps/backend/Dockerfile .
-
-      - name: Build Frontend Image
-        run: docker build -t frontend ./apps/frontend/Dockerfile .
-
-      # 🤖 Run Local AI Agent (Validation)
-      - name: Run Local AI Agent
+      - name: Build backend Docker image
         run: |
-          chmod +x script/local-production.sh
-          ./script/local-production.sh
+          echo "🔨 Building backend..."
+          docker build -t backend:${{ github.sha }} -f ./apps/backend/Dockerfile .
+          docker tag backend:${{ github.sha }} backend:latest
+          echo "✅ Backend image built"
 
-      # 🧠 AI Log Analysis (extra safety)
-      - name: AI Health Check
+      - name: Test backend image starts
         run: |
-          echo "Checking containers..."
+          docker run -d --name backend-test -p 5000:5000 backend:latest
+          sleep 5
+          curl -sf http://localhost:5000/health || {
+            echo "❌ Backend container failed health check"
+            docker logs backend-test
+            exit 1
+          }
+          echo "✅ Backend container healthy"
+          docker rm -f backend-test
+
+  # ─────────────────────────────────────────
+  # 🎨 Job 3: Build Frontend (if changed)
+  # ─────────────────────────────────────────
+  build-frontend:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.docker == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend Docker image
+        run: |
+          echo "🎨 Building frontend..."
+          docker build -t frontend:${{ github.sha }} -f ./apps/frontend/Dockerfile .
+          docker tag frontend:${{ github.sha }} frontend:latest
+          echo "✅ Frontend image built"
+
+      - name: Test frontend image starts
+        run: |
+          docker run -d --name frontend-test -p 80:80 frontend:latest
+          sleep 3
+          curl -sf http://localhost || {
+            echo "❌ Frontend container failed"
+            docker logs frontend-test
+            exit 1
+          }
+          echo "✅ Frontend container healthy"
+          docker rm -f frontend-test
+
+  # ─────────────────────────────────────────
+  # 🧪 Job 4: Integration Test (full stack)
+  # ─────────────────────────────────────────
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-backend, build-frontend]
+    # Run if either service was built
+    if: |
+      always() &&
+      (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped') &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped') &&
+      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.docker == 'true')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start full stack
+        run: |
+          echo "🚀 Starting full stack..."
+          docker-compose -f docker-compose.production.yaml up -d --build --force-recreate
+          sleep 15
+
+      - name: Check all containers running
+        run: |
           docker ps
-
           FAILED=$(docker ps -a --filter "status=exited" --format "{{.Names}}")
-
-          if [ ! -z "$FAILED" ]; then
-            echo "❌ Failed containers detected:"
-            echo "$FAILED"
-
-            docker-compose logs --tail=50
-
-            echo "🤖 AI Suggestions:"
-            echo "- Check Dockerfile"
-            echo "- Check environment variables"
-            echo "- Check ports"
-            echo "- Run local-production.sh manually"
-
+          if [ -n "$FAILED" ]; then
+            echo "❌ Failed: $FAILED"
+            docker-compose -f docker-compose.production.yaml logs --tail=50
             exit 1
           fi
+          echo "✅ All containers running"
 
-      # 🌐 Backend Test
-      - name: Test Backend
+      - name: Test backend health
         run: |
-          curl -f http://localhost:5000 || (
-            echo "❌ Backend failed"
-            docker-compose logs backend --tail=50
+          curl -sf http://localhost:5000/health && echo "✅ Backend OK" || {
+            docker-compose -f docker-compose.production.yaml logs backend --tail=30
             exit 1
-          )
+          }
 
-      # 🌐 Frontend Test
-      - name: Test Frontend
+      - name: Test frontend health
         run: |
-          curl -f http://localhost || (
-            echo "❌ Frontend failed"
-            docker-compose logs frontend --tail=50
+          curl -sf http://localhost && echo "✅ Frontend OK" || {
+            docker-compose -f docker-compose.production.yaml logs frontend --tail=30
             exit 1
-          )
+          }
 
-      # 🧹 Cleanup before deploy
+      - name: Test API proxy
+        run: |
+          curl -sf http://localhost/api/health && echo "✅ API proxy OK" || {
+            echo "⚠️ API proxy not responding (check nginx config)"
+          }
+
       - name: Cleanup
         if: always()
-        run: docker-compose down
+        run: docker-compose -f docker-compose.production.yaml down
 
-      # 🚀 Deploy to AWS (only on main branch)
-      - name: Deploy to AWS
-        if: github.ref == 'refs/heads/main'
+  # ─────────────────────────────────────────
+  # 🚀 Job 5: Deploy to AWS EC2
+  # ─────────────────────────────────────────
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, integration-test]
+    if: |
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.integration-test.result == 'success'
+
+    steps:
+      - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
-            echo "🚀 Running Production Deployment Script..."
-            cd ~/my-monorepo
-            chmod +x script/deploy-production.sh
-            ./script/deploy-production.sh
+            cd ~/resume_analysis
+            git pull origin main
 
-      # 🎉 Done
-      - name: Success
-        run: echo "🎉 AI CI/CD Pipeline Completed Successfully!"
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
 
-        # I built a CI/CD pipeline using GitHub Actions that builds Docker images,
-        #  runs automated health checks, and deploys to AWS EC2 via SSH using Docker Compose
+            # Only rebuild what changed
+            if echo "$CHANGED" | grep -qE "^apps/backend/|^tsconfig|Dockerfile"; then
+              echo "🔨 Rebuilding backend..."
+              docker-compose -f docker-compose.production.yaml up -d --build --no-deps --force-recreate backend
+            fi
+
+            if echo "$CHANGED" | grep -qE "^apps/frontend/|^nginx\.conf|Dockerfile"; then
+              echo "🎨 Rebuilding frontend..."
+              docker-compose -f docker-compose.production.yaml up -d --build --no-deps --force-recreate frontend
+            fi
+
+            if echo "$CHANGED" | grep -qE "docker-compose"; then
+              echo "🔄 Infra changed — full restart..."
+              docker-compose -f docker-compose.production.yaml up -d --build --force-recreate
+            fi
+
+            echo "✅ Deploy complete"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+      - name: Notify success
+        run: |
+          echo "🎉 Deployment to EC2 successful!"
+          echo "  Commit: ${{ github.sha }}"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo "  Actor:  ${{ github.actor }}"
