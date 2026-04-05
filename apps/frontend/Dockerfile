@@ -1,36 +1,36 @@
-# ---------- 🏗️ Build Stage ----------
-FROM node:18-alpine AS builder
+# ---------- 🏗️ Stage 1: Build ----------
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install deps (only needed files for caching)
+# Copy root-level files
 COPY package*.json ./
-RUN npm install
+COPY package-lock.json ./
+COPY tsconfig.base.json ./
 
-# Copy source
-COPY . .
+# Copy only frontend package.json for caching
+COPY apps/frontend/package.json ./apps/frontend/
 
-# Build app
+# Install only frontend deps
+RUN npm ci --workspace=apps/frontend
+
+# Copy frontend source only (NOT entire monorepo)
+COPY apps/frontend/ ./apps/frontend/
+
+# Build from frontend folder
+WORKDIR /app/apps/frontend
 RUN npm run build
 
-# ---------- 🚀 Production Stage ----------
+# ---------- 🚀 Stage 2: Production ----------
 FROM nginx:alpine
 
-# Remove default config
 RUN rm -rf /etc/nginx/conf.d/default.conf
 
-# Copy custom config
+# nginx.conf is at monorepo root
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy build output
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/apps/frontend/dist /usr/share/nginx/html
 
-# ---------- 🤖 Lightweight Health Check ----------
-HEALTHCHECK --interval=30s --timeout=3s \
-  CMD wget -q --spider http://localhost || exit 1
-
-# ---------- 🌐 Expose ----------
 EXPOSE 80
 
-# ---------- 🚀 Start ----------
 CMD ["nginx", "-g", "daemon off;"]

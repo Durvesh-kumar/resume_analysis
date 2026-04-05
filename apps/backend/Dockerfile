@@ -1,40 +1,83 @@
+# # ---------- 🏗️ Stage 1: Build ----------
+# FROM node:20-alpine AS builder
+
+# WORKDIR /app
+
+# # Copy root-level package files
+# COPY package*.json ./
+# COPY package-lock.json ./
+
+# # ✅ Copy root tsconfig that backend extends
+# COPY tsconfig.base.json ./
+
+# # Copy workspace package.json for caching
+# COPY apps/backend/package.json ./apps/backend/
+
+# # Install deps
+# RUN npm ci --workspace=apps/backend
+
+# # Copy backend source
+# COPY apps/backend/ ./apps/backend/
+
+# # Build
+# WORKDIR /app/apps/backend
+# RUN npm run build
+
+# # ---------- 🚀 Stage 2: Production ----------
+# FROM node:20-alpine
+
+# WORKDIR /app
+
+# COPY --from=builder /app/apps/backend/package.json ./package.json
+# COPY --from=builder /app/node_modules ./node_modules
+# COPY --from=builder /app/apps/backend/dist ./dist
+
+# HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+#   CMD wget -qO- http://localhost:5000 || exit 1
+
+# EXPOSE 5000
+
+# CMD ["node", "dist/index.js"]
+
+
 # ---------- 🏗️ Stage 1: Build ----------
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install only package files first (for caching)
 COPY package*.json ./
+COPY package-lock.json ./
+COPY tsconfig.base.json ./
+COPY apps/backend/package.json ./apps/backend/
 
-# Clean install (faster + reproducible)
-RUN npm install --ignore-scripts
+# Install ALL deps (including devDependencies for build)
+RUN npm ci --workspace=apps/backend
 
-# Copy source code
-COPY . .
+COPY apps/backend/ ./apps/backend/
 
-# Build TypeScript → JavaScript
+WORKDIR /app/apps/backend
 RUN npm run build
 
 # ---------- 🚀 Stage 2: Production ----------
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy only necessary files from builder
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+COPY package*.json ./
+COPY package-lock.json ./
+COPY apps/backend/package.json ./apps/backend/
 
-# ---------- 🤖 AI-style Health Check ----------
+# ✅ Only production deps — skips devDependencies (typescript, ts-node, etc.)
+RUN npm ci --workspace=apps/backend --omit=dev
+
+# ✅ Clean npm cache after install
+RUN npm cache clean --force
+
+COPY --from=builder /app/apps/backend/dist ./dist
+
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://localhost:5000 || exit 1
 
-# ---------- 🌐 Expose ----------
 EXPOSE 5000
 
-# ---------- 🚀 Start ----------
 CMD ["node", "dist/index.js"]
-
-
-# docker build -t backend ./apps/backend
-# docker run -p 5000:5000 backend

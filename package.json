@@ -1,10 +1,21 @@
 {
   "name": "resume_analysis",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build": "tsc -b",
     "start": "npm run dev --workspace=frontend",
     "dev": "npm run dev --workspace=backend"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "nodemon": "^3.1.14"
   }
 }

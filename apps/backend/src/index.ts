@@ -1,10 +1,10 @@
-import express from "express";
+import express, { Request, Response } from "express";
 
 const app = express();
 
-app.get("/health", (req, res) => res.send("OK"));
+app.get("/health", (req:Request, res:Response) => res.send("OK"));
 
-app.get("/", (req, res) => {
+app.get("/", (req:Request, res:Response) => {
   res.send("Hello from backend 🚀");
 });
 
