@@ -30,10 +30,10 @@ jobs:
 
       # 🔨 Build Docker images
       - name: Build Backend Image
-        run: docker build -t backend ./apps/backend
+        run: docker build -t backend ./apps/backend/Dockerfile .
 
       - name: Build Frontend Image
-        run: docker build -t frontend ./apps/frontend
+        run: docker build -t frontend ./apps/frontend/Dockerfile .
 
       # 🤖 Run Local AI Agent (Validation)
       - name: Run Local AI Agent
