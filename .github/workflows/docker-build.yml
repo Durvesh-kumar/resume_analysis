@@ -1,0 +1,109 @@
+name: 🤖 AI CI/CD Pipeline (Docker + Deploy)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 📥 Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 🟢 Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # 📦 Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 🐳 Check Docker
+      - name: Check Docker
+        run: docker --version
+
+      # 🔨 Build Docker images
+      - name: Build Backend Image
+        run: docker build -t backend ./apps/backend
+
+      - name: Build Frontend Image
+        run: docker build -t frontend ./apps/frontend
+
+      # 🤖 Run Local AI Agent (Validation)
+      - name: Run Local AI Agent
+        run: |
+          chmod +x script/local-production.sh
+          ./script/local-production.sh
+
+      # 🧠 AI Log Analysis (extra safety)
+      - name: AI Health Check
+        run: |
+          echo "Checking containers..."
+          docker ps
+
+          FAILED=$(docker ps -a --filter "status=exited" --format "{{.Names}}")
+
+          if [ ! -z "$FAILED" ]; then
+            echo "❌ Failed containers detected:"
+            echo "$FAILED"
+
+            docker-compose logs --tail=50
+
+            echo "🤖 AI Suggestions:"
+            echo "- Check Dockerfile"
+            echo "- Check environment variables"
+            echo "- Check ports"
+            echo "- Run local-production.sh manually"
+
+            exit 1
+          fi
+
+      # 🌐 Backend Test
+      - name: Test Backend
+        run: |
+          curl -f http://localhost:5000 || (
+            echo "❌ Backend failed"
+            docker-compose logs backend --tail=50
+            exit 1
+          )
+
+      # 🌐 Frontend Test
+      - name: Test Frontend
+        run: |
+          curl -f http://localhost || (
+            echo "❌ Frontend failed"
+            docker-compose logs frontend --tail=50
+            exit 1
+          )
+
+      # 🧹 Cleanup before deploy
+      - name: Cleanup
+        if: always()
+        run: docker-compose down
+
+      # 🚀 Deploy to AWS (only on main branch)
+      - name: Deploy to AWS
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            echo "🚀 Running Production Deployment Script..."
+            cd ~/my-monorepo
+            chmod +x script/deploy-production.sh
+            ./script/deploy-production.sh
+
+      # 🎉 Done
+      - name: Success
+        run: echo "🎉 AI CI/CD Pipeline Completed Successfully!"
+
+        # I built a CI/CD pipeline using GitHub Actions that builds Docker images,
+        #  runs automated health checks, and deploys to AWS EC2 via SSH using Docker Compose

@@ -1,0 +1,36 @@
+# Node modules
+node_modules/
+
+# Build files
+dist/
+build/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Env files
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# Coverage
+coverage/
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+.tmp/
+.cache/
